@@ -1,6 +1,6 @@
 
 
-// module Matrix;
+module Matrix;
 
 import std.string;
 import std.exception;
