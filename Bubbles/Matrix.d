@@ -1,15 +1,14 @@
 
-
-module Matrix;
-
 import std.string;
 import std.exception;
 import std.array;
 import std.stdio;
+import std.complex;
 
 extern(C) void dsyev_(char *jobz,char *uplo,int *n,
     double *,int *, double *,double *,int *,int *);
-
+extern(C) void   zheev_(char *,char *,int *,Complex!double *, int *, double *,
+        Complex!double *,int *, double *, int *);
 
 class Matrix(T) {
 
@@ -76,11 +75,12 @@ private:
 
 void diag1(T)(Matrix!T m,ref double[] eigs,char option)
 {
+	enum cmplx = is(T == Complex!double);
 	char jobz=option;
 	char uplo='U';
 	int n=cast(int)m.n_row();
 	int lda=cast(int)m.n_col();
-	double[] work;
+	T[] work;
 	int info,lwork= -1;
 
 	enforce(lda>0,"Expected lda>0\n");
@@ -90,16 +90,32 @@ void diag1(T)(Matrix!T m,ref double[] eigs,char option)
 
 	// query:
 	work.length = 3;
-	dsyev_(&jobz,&uplo,&n,&(m(0,0)),&lda, eigs.ptr,work.ptr,&lwork, &info);
+	static if (!cmplx) {
+		dsyev_(&jobz,&uplo,&n,&(m(0,0)),&lda, eigs.ptr,work.ptr,&lwork, &info);
+	} else {
+		double[] rwork;
+		rwork.length = 3*n;
+		zheev_(&jobz,&uplo,&n,&(m(0,0)),&lda, eigs.ptr,work.ptr,&lwork,rwork.ptr,&info);
+	}
 	if (info!=0) {
 		writeln("info=",info);
 		assert(0,"diag: dsyev_: failed with info!=0.\n");
 	}
-	double x1 = *(work.ptr);
-	lwork = cast(int)(x1);
+	static if (!cmplx) {
+		double x11 = *(work.ptr);
+		lwork = cast(int)(x11);
+	} else {
+		T x1 = *(work.ptr);
+		double x11 = x1.re;
+		lwork = cast(int)(x11);
+	}
 	work.length = lwork+1;
 	// real work:
-	dsyev_(&jobz,&uplo,&n,&(m(0,0)),&lda, eigs.ptr,work.ptr,&lwork, &info);
+	static if (!cmplx) {
+		dsyev_(&jobz,&uplo,&n,&(m(0,0)),&lda, eigs.ptr,work.ptr,&lwork, &info);
+	} else {
+		zheev_(&jobz,&uplo,&n,&(m(0,0)),&lda, eigs.ptr,work.ptr,&lwork,rwork.ptr,&info);
+	}
 	if (info!=0) {
 		writeln("info=\n",info);
 		assert(0,"diag: dsyev_: failed with info!=0.\n");
