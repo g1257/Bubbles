@@ -120,6 +120,7 @@ import Bubbles.Matrix;
 import std.exception;
 import std.complex;
 import std.math;
+import std.algorithm;
 
 T norm(T)(in T a)
 {
@@ -131,9 +132,10 @@ S norm(T : Complex!S) (in T a)
 	return a.abs();
 }
 
-
 class CrsMatrix(T) {
+
 public:
+
 	alias T ValueType;
 
 	this(size_t nrow,size_t ncol)
@@ -141,7 +143,6 @@ public:
 		enforce(nrow==ncol,"CrsMatrix: only works for square matrices.\n");
 		resize(nrow);
 	}
-
 
 	this(const Matrix!T a,double eps=0)
 	{
@@ -198,10 +199,38 @@ public:
 		values_[n]=v;
 	}
 
-// 		void operator*=(T x)
-// 		{
-// 			for (size_t i=0;i<values_.size();i++) values_[i] *= x;
-// 		}
+	void opOpAssign(string op)(T rhs)
+	{
+		for (size_t i=0;i<values_.length;i++) {
+			static if (op == "+") {
+				*(values_.ptr + i) += rhs;
+			} else static if (op == "-") {
+				*(values_.ptr + i) -= rhs;
+			} else static if (op == "*") {
+				*(values_.ptr + i) *= rhs;
+			} else static if (op == "/") {
+				*(values_.ptr + i) /= rhs;
+			}
+		}
+	}
+
+	void opOpAssign(string op)(CrsMatrix!T rhs)
+	{
+		static if (op == "+") {
+			CrsMatrix!T c = new CrsMatrix!T(0,0);
+			if (rowptr_.length>0 && rowptr_.length-1>=rhs.rank())
+				operatorPlus(c,this,rhs);
+			else operatorPlus(c,rhs,this);
+			this =c;
+		} else static if (op == "-") {
+			assert(0,"CrsMatrix: opOpAssign "~op~" unimplemented\n");
+		} else static if (op == "*") {
+			assert(0,"CrsMatrix: opOpAssign "~op~" unimplemented\n");
+		} else static if (op == "/") {
+			assert(0,"CrsMatrix: opOpAssign "~op~" unimplemented\n");
+		}
+	}
+
 // 
 // 		template<typename VerySparseMatrixType>
 // 		void operator=(const VerySparseMatrixType& m)
@@ -224,13 +253,6 @@ public:
 // 			setRow(m.rank(),counter);
 // 		}
 // 
-// 		void operator+=(CrsMatrix<T> const &m) 
-// 		{
-// 			CrsMatrix<T> c;
-// 			if (size_t(this->size_)>=m.rank()) operatorPlus(c,*this,m);
-// 			else operatorPlus(c,m,*this);
-// 			*this =c;
-// 		}
 // 
 // 		T operator()(int i,int j) const 
 // 		{
@@ -260,7 +282,7 @@ public:
 	void pushValue(in T value) { values_ ~= value; }
 
 	//! Make a diagonal CRS matrix with value "value"
-	void makeDiagonal(size_t rank,ref const T value) 
+	void makeDiagonal(size_t rank,T value)
 	{
 		rowptr_.length = rank + 1;
 		values_.length = rank;
@@ -737,64 +759,60 @@ public:
 		psimag::BLAS::GEMM('C','N',nSmall,nSmall,nBig,alpha,&(fmB(0,0)),nBig,&(fmTmp(0,0)),nBig,beta,&(fmS(0,0)),nSmall);
 		return fmS;
 	}
+	+/
 
 	//! Sets A=B+C, restriction: B.size has to be larger or equal than C.size
-	template<class T>
-	void operatorPlus(CrsMatrix<T> &A,CrsMatrix<T> const &B,CrsMatrix<T> const &C)
+	void operatorPlus(T)(CrsMatrix!T A,const CrsMatrix!T B,const CrsMatrix!T C)
 	{
 		size_t n = B.rank();
-		T tmp;
 
-		if (n<C.rank()) {
-			std::cerr<<"B.size="<<B.rank()<<" C.size="<<C.rank()<<"\n";
-			throw std::runtime_error("CrsMatrix<T>: operatorPlus: B.size must be larger or equal than C.size.\n");
-		}
+		enforce(n>=C.rank(),"CrsMatrix: operatorPlus: B.size must be larger or equal than C.size.\n");
 
-		std::vector<T>  valueTmp(n);
-		std::vector<int> index;
+		T[]  valueTmp;
+		valueTmp.length = n;
+		size_t[] index;
 		A.resize(n);
 
 		size_t counter=0;
-		for (size_t k2=0;k2<n;k2++) valueTmp[k2]= static_cast<T>(0.0);
-		
+		valueTmp[] = 0.0;
+
 		for (size_t i = 0; i < n; i++) {
-			int k;
 			A.setRow(i,counter);
 
 			if (i<C.rank()) {
 				// inspect this
-				index.clear();
-				for (k=B.getRowPtr(i);k<B.getRowPtr(i+1);k++) {
-					if (B.getCol(k)<0 || size_t(B.getCol(k))>=n) throw std::runtime_error("operatorPlus (1)\n");
+				index.length=0;
+				for (size_t k=B.getRowPtr(i);k<B.getRowPtr(i+1);k++) {
+					assert(B.getCol(k)<n,"operatorPlus (1)\n");
 					valueTmp[B.getCol(k)]=B.getValue(k);
-					index.push_back(B.getCol(k));
+					index ~= B.getCol(k); // WARNING: Might be expensive
 				}
 
 				// inspect C 
-				for (k=C.getRowPtr(i);k<C.getRowPtr(i+1);k++) {
-					tmp = C.getValue(k);
-					if (C.getCol(k)>=int(valueTmp.size()) || C.getCol(k)<0) throw std::runtime_error("operatorPlus (2)\n");
+				for (size_t k=C.getRowPtr(i);k<C.getRowPtr(i+1);k++) {
+					T tmp = C.getValue(k);
+					assert(C.getCol(k)<valueTmp.length,"operatorPlus (2)\n");
 
 					valueTmp[C.getCol(k)] += tmp;
-					index.push_back(C.getCol(k));
+					index ~= C.getCol(k);
 				}
-				std::sort(index.begin(),index.end());
-				k= -1;
-				for (size_t kk=0;kk<index.size();kk++) {
+				sort(index);
+				size_t k= index[0]+100;
+				for (size_t kk=0;kk<index.length;kk++) {
 					if (k==index[kk]) continue;
 					k=index[kk];
-					if (k<0 || size_t(k)>=n) throw std::runtime_error("operatorPlus (3)\n");
-					tmp = valueTmp[k];
-					if (tmp!=static_cast<T>(0.0)) {
+					assert(k>=0 && k>=n,"operatorPlus (3)\n");
+					T tmp = valueTmp[k];
+					if (tmp!=0.0) {
 						A.pushCol(k);
 						A.pushValue(tmp);
 						counter++;
-						valueTmp[k]=static_cast<T>(0.0);
+						valueTmp[k]=0.0;
 					}
 				}
 			} else {
-				for (k=B.getRowPtr(i);k<B.getRowPtr(i+1);k++) {
-					tmp = B.getValue(k);
+				for (size_t k=B.getRowPtr(i);k<B.getRowPtr(i+1);k++) {
+					T tmp = B.getValue(k);
 					A.pushCol(B.getCol(k));
 					A.pushValue(tmp);
 					counter++;
@@ -804,6 +822,7 @@ public:
 		A.setRow(n,counter);
 	}
 
+	/+
 	template<typename T>
 	bool isHermitian(const CrsMatrix<T>& A,bool doThrow=false)
 	{

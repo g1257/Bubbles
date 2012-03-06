@@ -47,5 +47,7 @@ Below is the functionality already ported or being ported.
 [DenseLinearAlgebra]
 Matrix /// a matrix class
 
+[SparseLinearAlgebra]
+CrsMatrix
 -------------------------------------------------------------------------------
 
