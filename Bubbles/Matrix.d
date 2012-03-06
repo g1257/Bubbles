@@ -28,6 +28,11 @@ public:
 		return *(data_.ptr + i + j*nrow_);
 	}
 
+	T opCall(size_t i,size_t j) const
+	{
+		return *(data_.ptr + i + j*nrow_);
+	}
+
 	size_t n_row() const { return nrow_; } // legacy name
 		
 	size_t n_col() const { return ncol_; } // legacy name
